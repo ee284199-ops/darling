@@ -789,9 +789,13 @@ pid_t spawnInitProcess(void)
 		exit(1);
 	}
 
-	if (unshare(CLONE_NEWUTS | CLONE_NEWIPC) != 0)
+	// The IPC namespace is deliberately shared with the host: X servers attach the SysV shared memory
+	// segments of MIT-SHM clients (e.g. Mesa's software rendering paths) by ID, which fails across IPC
+	// namespaces and leaves the windows of GUI apps blank. POSIX shared memory is still kept private,
+	// since darlingserver mounts a fresh /dev/shm for the container.
+	if (unshare(CLONE_NEWUTS) != 0)
 	{
-		fprintf(stderr, "Cannot unshare UTS and IPC namespaces to create darling-init: %s\n", strerror(errno));
+		fprintf(stderr, "Cannot unshare the UTS namespace to create darling-init: %s\n", strerror(errno));
 		exit(1);
 	}
 
