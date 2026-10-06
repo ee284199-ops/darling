@@ -14,8 +14,8 @@ function(add_devtest_app name)
 
 	# test apps are never installed, so skip the dSYM install rules
 	set(${name}_NO_DSYM TRUE)
-	add_darling_executable(${name} ${APP_SOURCES})
-	target_link_libraries(${name} ${APP_LIBRARIES})
+	add_darling_executable(${name} ${APP_SOURCES} "${devtests_SOURCE_DIR}/common/UncaughtExceptionLogger.m")
+	target_link_libraries(${name} ${APP_LIBRARIES} Foundation)
 
 	set(contents "${CMAKE_CURRENT_BINARY_DIR}/${name}.app/Contents")
 	set(DEVTEST_APP_NAME "${name}")
@@ -35,5 +35,8 @@ endfunction()
 add_subdirectory(appkit-basic)
 
 if (BUILD_METAL)
+	add_subdirectory(metal-compute)
+	add_subdirectory(metal-cube)
+	add_subdirectory(metal-texture)
 	add_subdirectory(metal-triangle)
 endif()

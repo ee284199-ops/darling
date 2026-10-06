@@ -1,0 +1,20 @@
+configure_file(
+	"${CMAKE_SOURCE_DIR}/src/external/metal/deps/indium/test/texturing/shaders.metallib"
+	"${CMAKE_CURRENT_BINARY_DIR}/default.metallib"
+	COPYONLY
+)
+
+add_devtest_app(MetalTexture
+	SOURCES
+		main.m
+		"${devtests_SOURCE_DIR}/common/MetalTestApp.m"
+	LIBRARIES
+		AppKit
+		Metal
+		MetalKit
+		QuartzCore
+		Foundation
+		objc
+	RESOURCES
+		"${CMAKE_CURRENT_BINARY_DIR}/default.metallib"
+)

@@ -86,7 +86,7 @@ int main(int argc, char** argv)
 		                                                styleMask: NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
 		                                                  backing: NSBackingStoreBuffered
 		                                                    defer: NO];
-		[window setTitle: @"AppKit Basic"];
+		[window setTitle: @"AppKitBasic"];
 
 		PaintView* paint = [[PaintView alloc] initWithFrame: NSMakeRect(0, 80, 560, 240)];
 		[paint setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
