@@ -85,6 +85,9 @@ static void setup_stack32(const char* filepath, struct load_results* lr);
 // this is called when argv[0] specifies an interpreter and we need to "unexpand" it (i.e. convert it from a Linux path to a vchrooted path)
 static void vchroot_unexpand_interpreter(struct load_results* lr);
 
+// points native libraries' caches into the prefix (see the definition)
+static void setup_native_cache_home(struct load_results* lr);
+
 // UUID of the main executable
 uint8_t exe_uuid[16];
 
@@ -274,6 +277,8 @@ int main(int argc, char** argv, char** envp)
 	}
 
 	__mldr_main_stack_top = (void*)mldr_load_results.stack_top;
+
+	setup_native_cache_home(&mldr_load_results);
 
 	start_thread(&mldr_load_results);
 
@@ -541,6 +546,29 @@ static void unset_special_env() {
 	unsetenv("__mldr_bprefs");
 	unsetenv("__mldr_sockpath");
 	unsetenv("__mldr_lifetime_pipe");
+};
+
+// Native libraries keep their caches under $XDG_CACHE_HOME, or $HOME/.cache without it (Mesa's shader
+// cache, for one). $HOME is a path inside the prefix, which they would look for on the Linux side and
+// fail to create there, so point XDG_CACHE_HOME at the same directory as Linux sees it.
+//
+// Only the native environment changes: glibc's setenv() moves new variables into an environ array of
+// its own, while the program got its environment from lr->envp when its stack was set up.
+static void setup_native_cache_home(struct load_results* lr) {
+	const char* home = getenv("HOME");
+	char path[4096];
+	int length;
+
+	if (lr->root_path == NULL || getenv("XDG_CACHE_HOME") != NULL || home == NULL || home[0] != '/') {
+		return;
+	}
+
+	length = snprintf(path, sizeof(path), "%.*s%s/.cache", (int)lr->root_path_length, lr->root_path, home);
+	if (length <= 0 || length >= sizeof(path)) {
+		return;
+	}
+
+	setenv("XDG_CACHE_HOME", path, 0);
 };
 
 typedef struct socket_bitmap {
