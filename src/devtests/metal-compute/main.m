@@ -13,6 +13,9 @@ static int fail(const char* what, NSError* error)
 
 int main(int argc, char** argv)
 {
+	// progress output must survive a crash even when stdout is a pipe
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	@autoreleasepool {
 		id<MTLDevice> device = [MTLCreateSystemDefaultDevice() autorelease];
 		if (!device) {
