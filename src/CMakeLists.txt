@@ -483,3 +483,9 @@ if (COMPONENT_jsc)
 endif()
 
 #add_subdirectory(external/WebCore)
+
+# Developer GUI test apps; never installed (see src/devtests/CMakeLists.txt)
+option(DARLING_DEV_TESTS "Build the developer GUI test apps in src/devtests" OFF)
+if (DARLING_DEV_TESTS AND COMPONENT_gui)
+	add_subdirectory(devtests)
+endif()

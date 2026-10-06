@@ -1,0 +1,39 @@
+# Developer GUI test apps for Darling.
+#
+# Not built or installed by default: configure with -DDARLING_DEV_TESTS=ON, then
+# run the bundles straight from the build tree inside Darling, e.g.
+#   darling shell /Volumes/SystemRoot/<build>/src/devtests/appkit-basic/AppKitBasic.app/Contents/MacOS/AppKitBasic
+project(devtests)
+
+# add_devtest_app(<name> SOURCES <file>... [LIBRARIES <lib>...] [RESOURCES <file>...])
+#
+# Builds <name> as a Mach-O executable and assembles <name>.app in the current
+# binary directory, copying RESOURCES into Contents/Resources.
+function(add_devtest_app name)
+	cmake_parse_arguments(APP "" "" "SOURCES;LIBRARIES;RESOURCES" ${ARGN})
+
+	# test apps are never installed, so skip the dSYM install rules
+	set(${name}_NO_DSYM TRUE)
+	add_darling_executable(${name} ${APP_SOURCES})
+	target_link_libraries(${name} ${APP_LIBRARIES})
+
+	set(contents "${CMAKE_CURRENT_BINARY_DIR}/${name}.app/Contents")
+	set(DEVTEST_APP_NAME "${name}")
+	configure_file("${devtests_SOURCE_DIR}/Info.plist.in" "${contents}/Info.plist" @ONLY)
+
+	add_custom_command(TARGET ${name} POST_BUILD
+		COMMAND "${CMAKE_COMMAND}" -E make_directory "${contents}/MacOS" "${contents}/Resources"
+		COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:${name}>" "${contents}/MacOS/${name}"
+	)
+	if (APP_RESOURCES)
+		add_custom_command(TARGET ${name} POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy ${APP_RESOURCES} "${contents}/Resources/"
+		)
+	endif()
+endfunction()
+
+add_subdirectory(appkit-basic)
+
+if (BUILD_METAL)
+	add_subdirectory(metal-triangle)
+endif()
