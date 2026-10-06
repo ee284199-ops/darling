@@ -454,3 +454,7 @@
 [submodule "src/external/xnu"]
 	path = src/external/xnu
 	url = ../darling-xnu.git
+[submodule "src/external/tcl"]
+	path = src/external/tcl
+	url = https://github.com/tcltk/tcl.git
+	shallow = true

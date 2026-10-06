@@ -7,6 +7,13 @@ if (COMPONENT_system)
 	add_subdirectory(DirectoryServices)
 endif()
 
+if (COMPONENT_cli)
+	set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "cli")
+
+	# built from the upstream sources in src/external/tcl
+	add_subdirectory(Tcl)
+endif()
+
 # this is mainly for frameworks that are required for Security,
 # since Security is built for both CLI and GUI
 if (COMPONENT_cli OR COMPONENT_dev_gui_common)
