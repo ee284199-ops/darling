@@ -44,6 +44,8 @@ CGL_EXPORT CGLError CGLQueryRendererInfo(unsigned long display_mask, CGLRenderer
 CGL_EXPORT CGLError CGLDestroyRendererInfo(CGLRendererInfoObj rend);
 CGL_EXPORT CGLError CGLDescribeRenderer(CGLRendererInfoObj rend, long rend_num, CGLRendererProperty prop, long *value);
 
+CGL_EXPORT const char* CGLErrorString(CGLError error);
+
 CGL_EXPORT CGLError CGLCreatePBuffer(GLsizei width, GLsizei height, GLenum target, GLenum internalFormat, GLint maxDetail, CGLPBufferObj *pbuffer);
 CGL_EXPORT CGLError CGLDescribePBuffer(CGLPBufferObj pbuffer, GLsizei *width, GLsizei *height, GLenum *target, GLenum *internalFormat, GLint *mipmap);
 CGL_EXPORT CGLPBufferObj CGLRetainPBuffer(CGLPBufferObj pbuffer);

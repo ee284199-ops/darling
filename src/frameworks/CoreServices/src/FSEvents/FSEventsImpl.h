@@ -61,6 +61,7 @@
 -(void)start;
 -(void)stop;
 -(FSEventStreamEventId)lastEventID;
++(FSEventStreamEventId)currentEventID;
 -(void)_doCallback;
 
 @end

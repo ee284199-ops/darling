@@ -1,4 +1,5 @@
 #include "DASession.h"
+#include <DiskArbitration/DiskArbitration.h>
 #include <stddef.h>
 #include <string.h>
 #include <CoreFoundation/CFRuntime.h>
@@ -173,5 +174,22 @@ void DAApprovalSessionScheduleWithRunLoop(DAApprovalSessionRef session,
 void DAApprovalSessionUnscheduleFromRunLoop(DAApprovalSessionRef session,
 		CFRunLoopRef runLoop, CFStringRef runLoopMode)
 {
-	
+
+}
+
+void DARegisterDiskAppearedCallback(DASessionRef session,
+		CFDictionaryRef match, DADiskAppearedCallback callback, void *context)
+{
+	// Darling does not report disk arrival, so there is nothing to register.
+}
+
+void DARegisterDiskDisappearedCallback(DASessionRef session,
+		CFDictionaryRef match, DADiskDisappearedCallback callback, void *context)
+{
+	// Darling does not report disk disappearance, so there is nothing to register.
+}
+
+void DAUnregisterCallback(DASessionRef session, void *callback, void *context)
+{
+	// no callbacks can be registered, so there is nothing to unregister
 }

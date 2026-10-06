@@ -62,6 +62,23 @@ FSEventStreamEventId FSEventStreamGetLatestEventId(ConstFSEventStreamRef streamR
 	return [((FSEventsImpl*) streamRef) lastEventID];
 }
 
+dev_t FSEventStreamGetDeviceBeingWatched(ConstFSEventStreamRef streamRef)
+{
+	// FSEventStreamCreateRelativeToDevice() is not supported, so no device is being watched
+	return 0;
+}
+
+FSEventStreamEventId FSEventsGetCurrentEventId(void)
+{
+	return [FSEventsImpl currentEventID];
+}
+
+Boolean FSEventsPurgeEventsForDeviceUpToEventId(dev_t device, FSEventStreamEventId eventId)
+{
+	// no persistent event history is kept, so there is nothing to purge
+	return TRUE;
+}
+
 void FSEventStreamInvalidate(FSEventStreamRef streamRef)
 {
 	[((FSEventsImpl*) streamRef) invalidate];

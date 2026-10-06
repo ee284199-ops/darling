@@ -114,6 +114,12 @@ extern CF_RETURNS_RETAINED CFArrayRef FSEventStreamCopyPathsBeingWatched(ConstFS
 
 extern FSEventStreamEventId FSEventStreamGetLatestEventId(ConstFSEventStreamRef streamRef);
 
+extern dev_t FSEventStreamGetDeviceBeingWatched(ConstFSEventStreamRef streamRef);
+
+extern FSEventStreamEventId FSEventsGetCurrentEventId(void);
+
+extern Boolean FSEventsPurgeEventsForDeviceUpToEventId(dev_t device, FSEventStreamEventId eventId);
+
 extern void FSEventStreamInvalidate(FSEventStreamRef streamRef);
 
 extern void FSEventStreamRelease(FSEventStreamRef streamRef);

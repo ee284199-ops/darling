@@ -27,6 +27,9 @@
 
 static dispatch_queue_t g_fsEventsQueue = NULL;
 
+// the event ID most recently handed out to any stream
+static FSEventStreamEventId g_fsEventsCurrentEventID = 0;
+
 static void rlPerform(void* info)
 {
 	FSEventsImpl* fse = (FSEventsImpl*) info;
@@ -186,6 +189,11 @@ static void rlPerform(void* info)
 	return _lastEventID;
 }
 
++(FSEventStreamEventId)currentEventID
+{
+	return g_fsEventsCurrentEventID;
+}
+
 -(void)_readEvents
 {
 	const size_t bytes = sizeof(struct inotify_event) + 4096 + 1;
@@ -261,6 +269,7 @@ static void rlPerform(void* info)
 
 	_idArray = (FSEventStreamEventId*) realloc(_idArray, sizeof(*_idArray) * newCount);
 	_idArray[newCount-1] = ++_lastEventID;
+	g_fsEventsCurrentEventID = _lastEventID;
 }
 
 -(void)_dispatchEvents

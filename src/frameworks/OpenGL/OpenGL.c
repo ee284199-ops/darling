@@ -428,3 +428,46 @@ CGLError CGLQueryRendererInfo(unsigned long display_mask, CGLRendererInfoObj *re
 CGLError CGLDestroyRendererInfo(CGLRendererInfoObj rend) {
     return kCGLNoError;
 }
+
+const char* CGLErrorString(CGLError error) {
+    switch (error) {
+    case kCGLNoError:
+        return "no error";
+    case kCGLBadAttribute:
+        return "invalid pixel format attribute";
+    case kCGLBadProperty:
+        return "invalid renderer property";
+    case kCGLBadPixelFormat:
+        return "invalid pixel format object";
+    case kCGLBadRendererInfo:
+        return "invalid renderer information object";
+    case kCGLBadContext:
+        return "invalid context object";
+    case kCGLBadDrawable:
+        return "invalid drawable";
+    case kCGLBadDisplay:
+        return "invalid display";
+    case kCGLBadState:
+        return "invalid context state";
+    case kCGLBadValue:
+        return "invalid numerical value";
+    case kCGLBadMatch:
+        return "invalid share context";
+    case kCGLBadEnumeration:
+        return "invalid enumerant";
+    case kCGLBadOffScreen:
+        return "invalid off-screen drawable";
+    case kCGLBadFullScreen:
+        return "invalid full-screen drawable";
+    case kCGLBadWindow:
+        return "invalid context window";
+    case kCGLBadAddress:
+        return "invalid memory allocation";
+    case kCGLBadCodeModule:
+        return "invalid connection to CGS";
+    case kCGLBadAlloc:
+        return "invalid CGL code";
+    default:
+        return "unknown error";
+    }
+}
