@@ -22,11 +22,11 @@
 
 #include <simd/vector_types.h>
 
-inline simd_float3 simd_make_float3(float x, float y, float z) {
+static inline simd_float3 simd_make_float3(float x, float y, float z) {
     return (simd_float3){x, y, z};
 }
 
-inline simd_uint2 simd_make_uint2(unsigned int x, unsigned int y) {
+static inline simd_uint2 simd_make_uint2(unsigned int x, unsigned int y) {
     return (simd_uint2){x, y};
 }
 

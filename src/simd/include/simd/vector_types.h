@@ -20,6 +20,8 @@
 #ifndef VECTOR_TYPE_H
 #define VECTOR_TYPE_H
 
+#include <stdbool.h>
+
 // typedef  __attribute__((ext_vector_type())) ;
 #define simd_struct(NAME_TYPE, A, B) \
 typedef struct { \
