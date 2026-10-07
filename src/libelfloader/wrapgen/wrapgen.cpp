@@ -265,12 +265,45 @@ void generate_wrapper(std::ofstream& output, const char* soname, const std::set<
 	output << "__attribute__((destructor)) static void destructor() {\n"
 		"\t_elfcalls->dlclose_fatal(lib_handle);\n"
 		"}\n\n";
-	
+
+	// dlsym() returns the stub of a resolver-backed symbol, and that stub runs the resolver on the
+	// first call through it, in the middle of the call, so the resolver has to leave the caller's
+	// arguments alone. ld64's resolver helper saves the integer registers, but floating point
+	// arguments are in xmm0-7, which dlsym_fatal's SSE string functions overwrite: glClearColor or
+	// glUniform2f called through a pointer from dlsym or CFBundleGetFunctionPointerForName lost
+	// their values the first time. lookup_keeping_arguments saves xmm0-7 around the lookup.
+	output << "__attribute__((used)) static void* lookup(const char* name) {\n"
+		"\treturn _elfcalls->dlsym_fatal(lib_handle, name);\n"
+		"}\n\n"
+		"#if defined(__x86_64__)\n"
+		"void* lookup_keeping_arguments(const char* name);\n"
+		"__asm__(\n"
+		"\t\".text\\n\"\n"
+		"\t\".globl _lookup_keeping_arguments\\n\"\n"
+		"\t\".private_extern _lookup_keeping_arguments\\n\"\n"
+		"\t\".p2align 4\\n\"\n"
+		"\t\"_lookup_keeping_arguments:\\n\"\n"
+		"\t\"\tpushq %rbp\\n\"\n"
+		"\t\"\tmovq %rsp, %rbp\\n\"\n"
+		"\t\"\tsubq $128, %rsp\\n\"\n";
+	for (int i = 0; i < 8; i++)
+		output << "\t\"\tmovdqa %xmm" << i << ", " << i * 16 << "(%rsp)\\n\"\n";
+	output << "\t\"\tcallq _lookup\\n\"\n";
+	for (int i = 0; i < 8; i++)
+		output << "\t\"\tmovdqa " << i * 16 << "(%rsp), %xmm" << i << "\\n\"\n";
+	output << "\t\"\tleave\\n\"\n"
+		"\t\"\tretq\\n\"\n"
+		");\n"
+		"#else\n"
+		"// i386 passes floating point arguments on the stack\n"
+		"#define lookup_keeping_arguments lookup\n"
+		"#endif\n\n";
+
 	for (const std::string& sym : symbols)
 	{
 		output << "void* " << sym << "() {\n"
 			"\t__asm__(\".symbol_resolver _" << sym << "\");\n"
-			"\treturn _elfcalls->dlsym_fatal(lib_handle, \"" << sym << "\");\n"
+			"\treturn lookup_keeping_arguments(\"" << sym << "\");\n"
 			"}\n\n";
 	}
 	output << "asm(\".section __TEXT,__elfname\\n"
