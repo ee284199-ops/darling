@@ -18,7 +18,33 @@
 */
 
 #import <UniformTypeIdentifiers/NSString+UTAdditions.h>
+#import <UniformTypeIdentifiers/UTType.h>
 
 @implementation NSString (UTAdditions)
+
+- (NSString *)stringByAppendingPathComponent: (NSString *)partialName conformingToType: (UTType *)contentType
+{
+	NSString* result = [self stringByAppendingPathComponent: partialName];
+
+	if ([[result pathExtension] length] == 0)
+	{
+		NSString* extension = [contentType preferredFilenameExtension];
+
+		if ([extension length] > 0)
+			result = [result stringByAppendingPathExtension: extension];
+	}
+
+	return result;
+}
+
+- (NSString *)stringByAppendingPathExtensionForType: (UTType *)contentType
+{
+	NSString* extension = [contentType preferredFilenameExtension];
+
+	if ([extension length] == 0)
+		return self;
+
+	return [self stringByAppendingPathExtension: extension];
+}
 
 @end

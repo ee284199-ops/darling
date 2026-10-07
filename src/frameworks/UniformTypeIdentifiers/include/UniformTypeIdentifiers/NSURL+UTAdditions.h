@@ -17,8 +17,18 @@
  along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <Foundation/Foundation.h>
+#ifndef UNIFORMTYPEIDENTIFIERS_NSURL_UTADDITIONS_H
+#define UNIFORMTYPEIDENTIFIERS_NSURL_UTADDITIONS_H
+
+#import <Foundation/Foundation.h>
+
+@class UTType;
 
 @interface NSURL (UTAdditions)
 
+- (NSURL *)URLByAppendingPathComponent: (NSString *)partialName conformingToType: (UTType *)contentType;
+- (NSURL *)URLByAppendingPathExtensionForType: (UTType *)contentType;
+
 @end
+
+#endif

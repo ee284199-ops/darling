@@ -20,13 +20,8 @@ add_framework(UniformTypeIdentifiers
 
 	SOURCES
 		src/UTType.m
-		src/_UTConstantType.m
-		src/_UTCoreType.m
-		src/_UTRuntimeConstantType.m
-		src/_UTTaggedType.m
 		src/NSURL+UTAdditions.m
 		src/NSItemProvider+UTType.m
-		src/_UTCoreType+UTRefCounting.m
 		src/NSString+UTAdditions.m
 		src/UniformTypeIdentifiers.m
 
@@ -34,4 +29,6 @@ add_framework(UniformTypeIdentifiers
 		system
 		objc
 		Foundation
+		CoreFoundation
+		CoreServices
 )

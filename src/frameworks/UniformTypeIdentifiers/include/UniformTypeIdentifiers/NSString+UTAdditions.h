@@ -17,8 +17,18 @@
  along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <Foundation/Foundation.h>
+#ifndef UNIFORMTYPEIDENTIFIERS_NSSTRING_UTADDITIONS_H
+#define UNIFORMTYPEIDENTIFIERS_NSSTRING_UTADDITIONS_H
+
+#import <Foundation/Foundation.h>
+
+@class UTType;
 
 @interface NSString (UTAdditions)
 
+- (NSString *)stringByAppendingPathComponent: (NSString *)partialName conformingToType: (UTType *)contentType;
+- (NSString *)stringByAppendingPathExtensionForType: (UTType *)contentType;
+
 @end
+
+#endif
