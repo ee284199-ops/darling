@@ -4,6 +4,7 @@
 #include <CoreServices/MacTypes.h>
 #include <CoreFoundation/CFString.h>
 #include <CoreFoundation/CFRunLoop.h>
+#include <dispatch/dispatch.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -13,14 +14,91 @@ typedef UInt32 AudioQueuePropertyID;
 typedef UInt32 AudioQueueParameterID;
 typedef Float32 AudioQueueParameterValue;
 
+enum
+{
+	kAudioQueueErr_InvalidBuffer = -66687,
+	kAudioQueueErr_BufferEmpty = -66686,
+	kAudioQueueErr_DisposalPending = -66685,
+	kAudioQueueErr_InvalidProperty = -66684,
+	kAudioQueueErr_InvalidPropertySize = -66683,
+	kAudioQueueErr_InvalidParameter = -66682,
+	kAudioQueueErr_CannotStart = -66681,
+	kAudioQueueErr_InvalidDevice = -66680,
+	kAudioQueueErr_BufferInQueue = -66679,
+	kAudioQueueErr_InvalidRunState = -66678,
+	kAudioQueueErr_InvalidQueueType = -66677,
+	kAudioQueueErr_Permissions = -66676,
+	kAudioQueueErr_InvalidPropertyValue = -66675,
+	kAudioQueueErr_PrimeTimedOut = -66674,
+	kAudioQueueErr_CodecNotFound = -66673,
+	kAudioQueueErr_InvalidCodecAccess = -66672,
+	kAudioQueueErr_QueueInvalidated = -66671,
+	kAudioQueueErr_TooManyTaps = -66670,
+	kAudioQueueErr_InvalidTapContext = -66669,
+	kAudioQueueErr_RecordUnderrun = -66668,
+	kAudioQueueErr_InvalidTapType = -66667,
+	kAudioQueueErr_BufferEnqueuedTwice = -66666,
+	kAudioQueueErr_CannotStartYet = -66665,
+	kAudioQueueErr_EnqueueDuringReset = -66632,
+	kAudioQueueErr_InvalidOfflineMode = -66626,
+};
+
+enum
+{
+	kAudioQueueProperty_IsRunning = 'aqrn',
+	kAudioQueueDeviceProperty_SampleRate = 'aqsr',
+	kAudioQueueDeviceProperty_NumberChannels = 'aqdc',
+	kAudioQueueProperty_CurrentDevice = 'aqcd',
+	kAudioQueueProperty_MagicCookie = 'aqmc',
+	kAudioQueueProperty_MaximumOutputPacketSize = 'xops',
+	kAudioQueueProperty_StreamDescription = 'aqft',
+	kAudioQueueProperty_ChannelLayout = 'aqcl',
+	kAudioQueueProperty_EnableLevelMetering = 'aqme',
+	kAudioQueueProperty_CurrentLevelMeter = 'aqmv',
+	kAudioQueueProperty_CurrentLevelMeterDB = 'aqmd',
+	kAudioQueueProperty_DecodeBufferSizeFrames = 'dcbf',
+	kAudioQueueProperty_ConverterError = 'qcve',
+	kAudioQueueProperty_EnableTimePitch = 'q_tp',
+	kAudioQueueProperty_TimePitchAlgorithm = 'qtpa',
+	kAudioQueueProperty_TimePitchBypass = 'qtpb',
+};
+
+enum
+{
+	kAudioQueueTimePitchAlgorithm_Spectral = 'spec',
+	kAudioQueueTimePitchAlgorithm_TimeDomain = 'tido',
+	kAudioQueueTimePitchAlgorithm_Varispeed = 'vspd',
+};
+
+enum
+{
+	kAudioQueueParam_Volume = 1,
+	kAudioQueueParam_PlayRate = 2,
+	kAudioQueueParam_Pitch = 3,
+	kAudioQueueParam_VolumeRampTime = 4,
+	kAudioQueueParam_Pan = 13,
+};
+
+struct AudioQueueLevelMeterState
+{
+	Float32 mAveragePower;
+	Float32 mPeakPower;
+};
+typedef struct AudioQueueLevelMeterState AudioQueueLevelMeterState;
+
 struct AudioQueueParameterEvent
 {
 	AudioQueueParameterID mID;
 	AudioQueueParameterValue mValue;
 };
+typedef struct AudioQueueParameterEvent AudioQueueParameterEvent;
 
+#ifdef __cplusplus
 class AudioQueue;
 typedef AudioQueue* AudioQueueRef;
+#else
+typedef struct AudioQueue* AudioQueueRef;
+#endif
 
 struct AudioQueueBuffer
 {
@@ -33,6 +111,7 @@ struct AudioQueueBuffer
 	AudioStreamPacketDescription* mPacketDescriptions;
 	UInt32 mPacketDescriptionCount;
 };
+typedef struct AudioQueueBuffer AudioQueueBuffer;
 typedef AudioQueueBuffer* AudioQueueBufferRef;
 	
 OSStatus AudioQueueStart(AudioQueueRef inAQ, const AudioTimeStamp *inStartTime);
@@ -59,6 +138,20 @@ OSStatus AudioQueueNewInput(const AudioStreamBasicDescription *inFormat,
 		void *inUserData, CFRunLoopRef inCallbackRunLoop,
 		CFStringRef inCallbackRunLoopMode, UInt32 inFlags,
 		AudioQueueRef *outAQ);
+
+#if defined(__BLOCKS__)
+typedef void (^AudioQueueOutputCallbackBlock)(AudioQueueRef inAQ, AudioQueueBufferRef inBuffer);
+typedef void (^AudioQueueInputCallbackBlock)(AudioQueueRef inAQ, AudioQueueBufferRef inBuffer,
+		const AudioTimeStamp* inStartTime, UInt32 inNumberPacketDescriptions,
+		const AudioStreamPacketDescription* inPacketDescs);
+
+OSStatus AudioQueueNewOutputWithDispatchQueue(AudioQueueRef *outAQ,
+		const AudioStreamBasicDescription *inFormat, UInt32 inFlags,
+		dispatch_queue_t inCallbackDispatchQueue, AudioQueueOutputCallbackBlock inCallbackBlock);
+OSStatus AudioQueueNewInputWithDispatchQueue(AudioQueueRef *outAQ,
+		const AudioStreamBasicDescription *inFormat, UInt32 inFlags,
+		dispatch_queue_t inCallbackDispatchQueue, AudioQueueInputCallbackBlock inCallbackBlock);
+#endif
 
 OSStatus AudioQueueDispose(AudioQueueRef inAQ, Boolean inImmediate);
 
@@ -90,8 +183,12 @@ OSStatus AudioQueueEnqueueBufferWithParameters(AudioQueueRef inAQ,
 		UInt32 inNumParamValues, const AudioQueueParameterEvent *inParamValues,
 		const AudioTimeStamp *inStartTime, AudioTimeStamp *outActualStartTime); 
 
+#ifdef __cplusplus
 class AudioQueueTimeline;
 typedef AudioQueueTimeline* AudioQueueTimelineRef;
+#else
+typedef struct AudioQueueTimeline* AudioQueueTimelineRef;
+#endif
 
 OSStatus AudioQueueCreateTimeline(AudioQueueRef inAQ, AudioQueueTimelineRef *outTimeline);
 OSStatus AudioQueueDisposeTimeline(AudioQueueRef inAQ, AudioQueueTimelineRef inTimeline);
