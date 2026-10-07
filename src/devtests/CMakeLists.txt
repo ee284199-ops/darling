@@ -33,7 +33,11 @@ function(add_devtest_app name)
 endfunction()
 
 add_subdirectory(appkit-basic)
+add_subdirectory(appkit-text)
+add_subdirectory(coreaudio-basics)
+add_subdirectory(coregraphics-drawing)
 add_subdirectory(coretext-fonts)
+add_subdirectory(foundation-collections)
 add_subdirectory(opengl-texture)
 add_subdirectory(uti-types)
 

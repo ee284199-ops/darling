@@ -1,0 +1,11 @@
+add_devtest_app(CoreGraphicsDrawing
+	SOURCES
+		main.m
+	LIBRARIES
+		AppKit
+		CoreText
+		CoreGraphics
+		CoreFoundation
+		Foundation
+		objc
+)

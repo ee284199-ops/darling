@@ -1,0 +1,10 @@
+add_devtest_app(AppKitText
+	SOURCES
+		main.m
+	LIBRARIES
+		AppKit
+		CoreText
+		CoreGraphics
+		Foundation
+		objc
+)
