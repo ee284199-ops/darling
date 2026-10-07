@@ -35,6 +35,7 @@ endfunction()
 add_subdirectory(appkit-basic)
 add_subdirectory(coretext-fonts)
 add_subdirectory(opengl-texture)
+add_subdirectory(uti-types)
 
 if (BUILD_METAL)
 	add_subdirectory(metal-compute)
