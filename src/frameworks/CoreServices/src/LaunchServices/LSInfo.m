@@ -106,7 +106,7 @@ CFArrayRef LSCopyApplicationURLsForBundleIdentifier(CFStringRef inBundleIdentifi
 {
 	if (!inBundleIdentifier)
 	{
-		if (*outError)
+		if (outError)
 			*outError = CFErrorCreate(NULL, kCFErrorDomainOSStatus, paramErr, NULL);
 		return NULL;
 	}
@@ -116,7 +116,7 @@ CFArrayRef LSCopyApplicationURLsForBundleIdentifier(CFStringRef inBundleIdentifi
 
 	if (dq == nil)
 	{
-		if (*outError)
+		if (outError)
 			*outError = CFErrorCreate(NULL, kCFErrorDomainOSStatus, fnfErr, NULL);
 		return NULL;
 	}
@@ -138,7 +138,7 @@ CFArrayRef LSCopyApplicationURLsForBundleIdentifier(CFStringRef inBundleIdentifi
 		}
 		else
 		{
-			if (*outError)
+			if (outError)
 				*outError = CFErrorCreate(NULL, kCFErrorDomainOSStatus, kLSApplicationNotFoundErr, NULL);
 			retval = NULL;
 		}
@@ -247,7 +247,7 @@ CFURLRef LSCopyDefaultApplicationURLForContentType(CFStringRef inContentType, LS
 
 	if (dq == nil)
 	{
-		if (*outError)
+		if (outError)
 			*outError = CFErrorCreate(NULL, kCFErrorDomainOSStatus, fnfErr, NULL);
 		return NULL;
 	}
@@ -275,7 +275,7 @@ CFURLRef LSCopyDefaultApplicationURLForContentType(CFStringRef inContentType, LS
 		}
 		else
 		{
-			if (*outError)
+			if (outError)
 				*outError = CFErrorCreate(NULL, kCFErrorDomainOSStatus, kLSApplicationNotFoundErr, NULL);
 			retval = NULL;
 		}
@@ -292,7 +292,7 @@ CFURLRef LSCopyDefaultApplicationURLForURL(CFURLRef inURL, LSRolesMask inRoleMas
 
 	if (status != noErr)
 	{
-		if (*outError)
+		if (outError)
 			*outError = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
 		return NULL;
 	}
@@ -310,11 +310,93 @@ OSStatus LSGetApplicationForURL(CFURLRef inURL, LSRolesMask inRoleMask, FSRef *o
 	return LSGetApplicationForInfo(kLSUnknownType, kLSUnknownCreator, (CFStringRef) extension, inRoleMask, outAppRef, outAppURL);
 }
 
+// The user's choices of handlers, like macOS keeps them: an LSHandlers array of
+// { LSHandlerURLScheme or LSHandlerContentType, LSHandlerRole..., LSHandlerPreferredVersions }.
+static CFStringRef const kLSHandlersDomain = CFSTR("com.apple.LaunchServices/com.apple.launchservices.secure");
+
+static NSString* preferredHandler(NSString* key, NSString* value, NSString* roleKey)
+{
+	NSArray* handlers = [(NSArray*) CFPreferencesCopyAppValue(CFSTR("LSHandlers"), kLSHandlersDomain) autorelease];
+
+	if (![handlers isKindOfClass: [NSArray class]])
+		return nil;
+
+	for (NSDictionary* handler in handlers)
+	{
+		if (![handler isKindOfClass: [NSDictionary class]])
+			continue;
+		if ([[handler objectForKey: key] caseInsensitiveCompare: value] != NSOrderedSame)
+			continue;
+
+		NSString* bundleID = [handler objectForKey: roleKey];
+		if (bundleID == nil)
+			bundleID = [handler objectForKey: @"LSHandlerRoleAll"];
+		if ([bundleID isKindOfClass: [NSString class]] && ![bundleID isEqualToString: @"-"])
+			return bundleID;
+	}
+	return nil;
+}
+
+static OSStatus setPreferredHandler(NSString* key, NSString* value, NSString* roleKey, NSString* bundleID)
+{
+	NSArray* handlers = [(NSArray*) CFPreferencesCopyAppValue(CFSTR("LSHandlers"), kLSHandlersDomain) autorelease];
+	NSMutableArray* updated = [NSMutableArray array];
+
+	if (value == nil || bundleID == nil)
+		return paramErr;
+
+	if ([handlers isKindOfClass: [NSArray class]])
+	{
+		for (NSDictionary* handler in handlers)
+		{
+			// replace this role's entry for the scheme or type
+			if ([handler isKindOfClass: [NSDictionary class]] &&
+				[[handler objectForKey: key] caseInsensitiveCompare: value] == NSOrderedSame &&
+				[handler objectForKey: roleKey] != nil)
+				continue;
+			[updated addObject: handler];
+		}
+	}
+
+	[updated addObject: @{ key: value, roleKey: bundleID, @"LSHandlerPreferredVersions": @{ roleKey: @"-" } }];
+	CFPreferencesSetAppValue(CFSTR("LSHandlers"), (CFArrayRef) updated, kLSHandlersDomain);
+	return CFPreferencesAppSynchronize(kLSHandlersDomain) ? noErr : kLSUnknownErr;
+}
+
+static NSString* roleKeyForMask(LSRolesMask role)
+{
+	if (role == kLSRolesViewer)
+		return @"LSHandlerRoleViewer";
+	if (role == kLSRolesEditor)
+		return @"LSHandlerRoleEditor";
+	if (role == kLSRolesShell)
+		return @"LSHandlerRoleShell";
+	return @"LSHandlerRoleAll";
+}
+
 CFArrayRef LSCopyAllHandlersForURLScheme(CFStringRef inURLScheme)
 {
-	puts("LSCopyAllHandlersForURLScheme STUB");
-	// NULL is a safe assumption to fall back on in the stub, since it means none were found.
-	return NULL;
+	__block NSMutableArray* handlers = nil;
+
+	if (inURLScheme == NULL)
+		return NULL;
+
+	[getDatabaseQueue() inDatabase:^(FMDatabase* db) {
+		FMResultSet* rs = [db executeQuery:@"select distinct B.bundle_id from bundle B "
+			@"join bundle_url_type T on T.bundle = B.id "
+			@"join bundle_url_type_scheme S on S.type = T.id "
+			@"where B.package_type = 'APPL' and S.scheme = ? order by B.id", (NSString*) inURLScheme];
+
+		while ([rs next])
+		{
+			if (handlers == nil)
+				handlers = [[NSMutableArray alloc] init];
+			[handlers addObject: [rs stringForColumn:@"bundle_id"]];
+		}
+		[rs close];
+	}];
+
+	return (CFArrayRef) handlers;
 }
 
 CFArrayRef LSCopyAllRoleHandlersForContentType(CFStringRef inContentType, LSRolesMask inRole)
@@ -326,6 +408,37 @@ CFArrayRef LSCopyAllRoleHandlersForContentType(CFStringRef inContentType, LSRole
 
 CFStringRef LSCopyDefaultHandlerForURLScheme(CFStringRef inURLScheme)
 {
-	puts("LSCopyDefaultHandlerForURLScheme STUB");
-	return NULL; // (could also return "" I guess)
+	NSString* chosen;
+	CFArrayRef all;
+	CFStringRef first = NULL;
+
+	if (inURLScheme == NULL)
+		return NULL;
+
+	chosen = preferredHandler(@"LSHandlerURLScheme", (NSString*) inURLScheme, @"LSHandlerRoleAll");
+	if (chosen != nil)
+		return (CFStringRef) [chosen copy];
+
+	// otherwise the first application that says it handles the scheme
+	all = LSCopyAllHandlersForURLScheme(inURLScheme);
+	if (all != NULL)
+	{
+		if (CFArrayGetCount(all) > 0)
+			first = CFStringCreateCopy(NULL, (CFStringRef) CFArrayGetValueAtIndex(all, 0));
+		CFRelease(all);
+	}
+	return first;
+}
+
+OSStatus LSSetDefaultHandlerForURLScheme(CFStringRef inURLScheme, CFStringRef inHandlerBundleID)
+{
+	return setPreferredHandler(@"LSHandlerURLScheme", (NSString*) inURLScheme, @"LSHandlerRoleAll",
+		(NSString*) inHandlerBundleID);
+}
+
+OSStatus LSSetDefaultRoleHandlerForContentType(CFStringRef inContentType, LSRolesMask inRole,
+	CFStringRef inHandlerBundleID)
+{
+	return setPreferredHandler(@"LSHandlerContentType", (NSString*) inContentType, roleKeyForMask(inRole),
+		(NSString*) inHandlerBundleID);
 }
