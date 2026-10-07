@@ -23,6 +23,7 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #include "PADispatchMainLoop.h"
 #include <CoreFoundation/CFBundle.h>
 #include <CoreFoundation/CFString.h>
+#include <Block.h>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -115,28 +116,34 @@ AudioHardwareStream* AudioHardwareImplPA::createStream(AudioDeviceIOProc callbac
 
 extern "C" char ***_NSGetArgv(void);
 
-static void paContextStateCB(pa_context* c, void* priv)
+void AudioHardwareImplPA::paContextStateCB(pa_context* c, void* self)
 {
-	void (^cb)(pa_context*) = (void (^)(pa_context*)) priv;
-
+	AudioHardwareImplPA* This = static_cast<AudioHardwareImplPA*>(self);
 	pa_context_state_t state = pa_context_get_state(c);
+	pa_context* result;
+
 	if (state == PA_CONTEXT_READY)
+		result = c;
+	else if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED)
 	{
-		// std::cout << "PA_CONTEXT_READY\n";
-
-		cb(c);
-		Block_release(cb);
-
-		// FIXME: We won't be notified about later disconnects...
-		pa_context_set_state_callback(c, nullptr, nullptr);
+		std::cerr << "PulseAudio error: " << pa_strerror(pa_context_errno(c)) << std::endl;
+		result = nullptr;
 	}
-	else if (state == PA_CONTEXT_FAILED)
-	{
-		std::cerr << "PulseAudio error: PA_CONTEXT_FAILED\n";
+	else
+		return;
 
-		cb(nullptr);
+	std::vector<void (^)(pa_context*)> waiters;
+	{
+		std::lock_guard<std::recursive_mutex> l(This->m_contextMutex);
+		This->m_contextState = result ? ContextState::Ready : ContextState::Failed;
+		waiters.swap(This->m_contextWaiters);
+	}
+
+	// this runs on the loop's queue, like the callers' stream setup has to
+	for (auto cb : waiters)
+	{
+		cb(result);
 		Block_release(cb);
-		pa_context_set_state_callback(c, nullptr, nullptr);
 	}
 }
 
@@ -153,74 +160,93 @@ static const char* appNameFromExecutable()
 void AudioHardwareImplPA::getPAContext(void (^cb)(pa_context*))
 {
 	// TODO: destruction
-	static std::mutex mutex;
+	std::unique_lock<std::recursive_mutex> l(m_contextMutex);
 
-	if (m_context == nullptr)
+	switch (m_contextState)
 	{
-		std::unique_lock<std::mutex> l(mutex);
-
-		if (m_context == nullptr)
+		case ContextState::Ready:
+		case ContextState::Failed:
 		{
-			const char* appname = appNameFromExecutable();
-			const char* appid = "org.darlinghq.some-app";
+			pa_context* context = (m_contextState == ContextState::Ready) ? m_context : nullptr;
 
-			pa_proplist* proplist = pa_proplist_new();
+			// Like for the first caller, this runs on the loop's queue: PulseAudio isn't thread safe,
+			// and the caller may still be constructing itself.
+			m_loop->async(^{ cb(context); });
+			return;
+		}
+		case ContextState::Connecting:
+			m_contextWaiters.push_back(Block_copy(cb));
+			return;
+		case ContextState::None:
+			break;
+	}
 
-			// Try to find a better application name & id from the bundle
-			CFBundleRef mainBundle = CFBundleGetMainBundle();
-			if (mainBundle)
-			{
-				CFStringRef ident = CFBundleGetIdentifier(mainBundle);
-				if (ident)
-					appid = CFStringGetCStringPtr(ident, kCFStringEncodingUTF8);
+	const char* appname = appNameFromExecutable();
+	const char* appid = "org.darlinghq.some-app";
 
-				CFDictionaryRef infoDict = CFBundleGetLocalInfoDictionary(mainBundle);
-				if (!infoDict)
-					infoDict = CFBundleGetInfoDictionary(mainBundle);
-				
-				if (infoDict)
-				{
-					CFStringRef name = (CFStringRef) CFDictionaryGetValue(infoDict, CFSTR("CFBundleDisplayName"));
-					if (!name)
-						name = (CFStringRef) CFDictionaryGetValue(infoDict, CFSTR("CFBundleName"));
-					if (name)
-						appname = CFStringGetCStringPtr(name, kCFStringEncodingUTF8);
-				}
-			}
+	pa_proplist* proplist = pa_proplist_new();
 
-			pa_proplist_sets(proplist, PA_PROP_APPLICATION_NAME, appname);
-			pa_proplist_sets(proplist, PA_PROP_APPLICATION_ID, appid);
-			if (m_paRole)
-				pa_proplist_sets(proplist, PA_PROP_MEDIA_ROLE, m_paRole);
-			// pa_proplist_sets(proplist, PA_PROP_APPLICATION_ICON_NAME, "icon-name");
-			// pa_proplist_sets(proplist, PA_PROP_MEDIA_ROLE, "game");
+	// Try to find a better application name & id from the bundle
+	CFBundleRef mainBundle = CFBundleGetMainBundle();
+	if (mainBundle)
+	{
+		CFStringRef ident = CFBundleGetIdentifier(mainBundle);
+		if (ident)
+			appid = CFStringGetCStringPtr(ident, kCFStringEncodingUTF8);
 
-			m_loop.reset(new PADispatchMainLoop);
-
-			m_context = pa_context_new_with_proplist(m_loop->getAPI(), appname, proplist);
-			pa_proplist_free(proplist);
-
-			if (!m_context)
-			{
-				cb(nullptr);
-				return;
-			}
-
-			pa_context_set_state_callback(m_context, paContextStateCB, Block_copy(cb));
-
-			if (pa_context_connect(m_context, nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0)
-			{
-				std::cerr << "pa_context_connect() returned an error\n";
-				pa_context_set_state_callback(m_context, nullptr, nullptr);
-				cb(nullptr);
-				return;
-			}
-
-			m_loop->resume();
+		CFDictionaryRef infoDict = CFBundleGetLocalInfoDictionary(mainBundle);
+		if (!infoDict)
+			infoDict = CFBundleGetInfoDictionary(mainBundle);
+		
+		if (infoDict)
+		{
+			CFStringRef name = (CFStringRef) CFDictionaryGetValue(infoDict, CFSTR("CFBundleDisplayName"));
+			if (!name)
+				name = (CFStringRef) CFDictionaryGetValue(infoDict, CFSTR("CFBundleName"));
+			if (name)
+				appname = CFStringGetCStringPtr(name, kCFStringEncodingUTF8);
 		}
 	}
-	else
-		cb(m_context);
+
+	pa_proplist_sets(proplist, PA_PROP_APPLICATION_NAME, appname);
+	pa_proplist_sets(proplist, PA_PROP_APPLICATION_ID, appid);
+	if (m_paRole)
+		pa_proplist_sets(proplist, PA_PROP_MEDIA_ROLE, m_paRole);
+	// pa_proplist_sets(proplist, PA_PROP_APPLICATION_ICON_NAME, "icon-name");
+	// pa_proplist_sets(proplist, PA_PROP_MEDIA_ROLE, "game");
+
+	m_loop.reset(new PADispatchMainLoop);
+
+	m_context = pa_context_new_with_proplist(m_loop->getAPI(), appname, proplist);
+	pa_proplist_free(proplist);
+
+	if (!m_context)
+	{
+		std::cerr << "pa_context_new() failed\n";
+		m_contextState = ContextState::Failed;
+		m_loop->resume();
+		l.unlock();
+		cb(nullptr);
+		return;
+	}
+
+	m_contextState = ContextState::Connecting;
+	pa_context_set_state_callback(m_context, paContextStateCB, this);
+
+	if (pa_context_connect(m_context, nullptr, PA_CONTEXT_NOFLAGS, nullptr) < 0 || m_contextState == ContextState::Failed)
+	{
+		std::cerr << "pa_context_connect() returned an error\n";
+		pa_context_set_state_callback(m_context, nullptr, nullptr);
+		m_contextState = ContextState::Failed;
+		m_loop->resume();
+		l.unlock();
+		cb(nullptr);
+		return;
+	}
+
+	// the loop is still suspended, so the context can't have connected yet
+	m_contextWaiters.push_back(Block_copy(cb));
+	m_loop->resume();
 }
 
 pa_sample_spec AudioHardwareImplPA::paSampleSpecForASBD(const AudioStreamBasicDescription& asbd, bool* convertSignedUnsigned)

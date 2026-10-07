@@ -21,6 +21,9 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #define PAGCDMAINLOOP_H
 #include <dispatch/dispatch.h>
 #include <pulse/pulseaudio.h>
+#include <unordered_map>
+
+struct dual_source;
 
 class PADispatchMainLoop
 {
@@ -30,7 +33,13 @@ public:
 
 	void suspend();
 	void resume();
-	
+
+	// PulseAudio's API isn't thread safe, so everything touching the context or its streams runs on the loop's queue.
+	void async(void (^block)());
+	// Runs the block on the loop's queue and waits for it - right away when already running on the queue.
+	void sync(void (^block)());
+	bool onQueue() const;
+
 	pa_mainloop_api* getAPI();
 private:
 	static pa_io_event* io_new(pa_mainloop_api *a, int fd, pa_io_event_flags_t events, pa_io_event_cb_t cb, void *userdata);
@@ -52,6 +61,8 @@ private:
 	dispatch_queue_t m_queue;
 	pa_mainloop_api m_api = {0};
 	bool m_suspended = true;
+	// io event sources by descriptor, kept for reuse when PulseAudio frees them
+	std::unordered_map<int, dual_source*> m_ioSources;
 };
 
 #endif

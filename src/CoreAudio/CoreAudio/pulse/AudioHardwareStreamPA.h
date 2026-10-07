@@ -24,7 +24,7 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #include <CoreAudio/CoreAudioTypes.h>
 #include <CoreAudio/AudioHardware.h>
 #include "AudioHardwareImplPA.h"
-#include <condition_variable>
+#include <memory>
 
 class AudioHardwareStreamPA : public AudioHardwareStream
 {
@@ -32,19 +32,28 @@ public:
 	AudioHardwareStreamPA(AudioHardwareImplPA* hw, AudioDeviceIOProc callback, void* clientData);
 	~AudioHardwareStreamPA();
 
+	// Creates the PulseAudio stream once the context is ready. Called once the object is fully constructed,
+	// because that ends up in the subclass' start().
+	void connect();
 	void stop(/*void(^cbDone)()*/) override;
 protected:
+	// Connects the new stream; runs on the PulseAudio loop's queue, like the stream callbacks
 	virtual void start();
 	void transformSignedUnsigned(AudioBufferList* abl) const;
+private:
+	void setUp(pa_context* context);
 protected:
 	AudioDeviceIOProc m_callback;
 	void* m_clientData;
-	pa_stream* m_stream;
-	void(^m_cbDone)();
+	pa_stream* m_stream = nullptr;
+	// the device's format when the stream was started (another client may change it later)
+	AudioStreamBasicDescription m_asbd;
 	bool m_convertSignedUnsigned = false;
 
 	bool m_running = false;
-	std::mutex m_stopMutex;
+	// Points back at the stream until it's stopped. Blocks waiting for the context and the stream callbacks hold
+	// a reference, so they can tell whether the stream is gone - the client may stop it from within its IOProc.
+	std::shared_ptr<AudioHardwareStreamPA*> m_self;
 };
 
 #endif /* AUDIOHARDWARESTREAMPA_H */

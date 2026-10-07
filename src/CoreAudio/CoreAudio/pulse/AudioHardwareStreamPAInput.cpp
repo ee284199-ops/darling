@@ -31,8 +31,8 @@ AudioHardwareStreamPAInput::AudioHardwareStreamPAInput(AudioHardwareImplPA* hw, 
 void AudioHardwareStreamPAInput::paStreamReadCB(pa_stream* s, size_t length, void* self)
 {
 	AudioHardwareStreamPAInput* This = static_cast<AudioHardwareStreamPAInput*>(self);
-
-	std::unique_lock<std::mutex> l(This->m_stopMutex);
+	// the client may stop (and delete) the stream from its IOProc
+	std::shared_ptr<AudioHardwareStreamPA*> alive = This->m_self;
 
 	if (!This->m_running)
 		return;
@@ -46,11 +46,11 @@ void AudioHardwareStreamPAInput::paStreamReadCB(pa_stream* s, size_t length, voi
 	while (true)
 	{
 		abl->mNumberBuffers = 1;
-		abl->mBuffers[0].mNumberChannels = 2;
+		abl->mBuffers[0].mNumberChannels = This->m_asbd.mChannelsPerFrame > 0 ? This->m_asbd.mChannelsPerFrame : 2;
 
 		size_t nbytes;
 
-		int rv = pa_stream_peek(This->m_stream, (const void**) &abl->mBuffers[0].mData, &nbytes);
+		int rv = pa_stream_peek(s, (const void**) &abl->mBuffers[0].mData, &nbytes);
 
 		if (rv < 0 || !nbytes)
 		{
@@ -74,11 +74,13 @@ void AudioHardwareStreamPAInput::paStreamReadCB(pa_stream* s, size_t length, voi
 		// std::cout << "AudioHardwareStreamPAInput::paStreamReadCB(): bytes=" << nbytes << std::endl;
 		OSStatus status = This->m_callback(This->m_hw->id(), &fake, abl, &fake, nullptr, nullptr, This->m_clientData);
 
-		pa_stream_drop(This->m_stream);
+		pa_stream_drop(s);
+		if (!*alive)
+			return; // stopped from the IOProc: the stream is gone
 
 		if (status != noErr)
 		{
-			pa_stream_cork(This->m_stream, true, [](pa_stream*, int, void*) {}, nullptr);
+			pa_stream_cork(s, true, [](pa_stream*, int, void*) {}, nullptr);
 			break;
 		}
 	}

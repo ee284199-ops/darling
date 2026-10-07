@@ -24,17 +24,33 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #include <limits>
 
 AudioHardwareStreamPA::AudioHardwareStreamPA(AudioHardwareImplPA* hw, AudioDeviceIOProc callback, void* clientData)
-: AudioHardwareStream(hw, false), m_callback(callback), m_clientData(clientData)
+: AudioHardwareStream(hw, false), m_callback(callback), m_clientData(clientData), m_asbd(hw->asbd()),
+  m_self(std::make_shared<AudioHardwareStreamPA*>(this))
 {
-	hw->getPAContext(^(pa_context* context) {
-		if (!context)
-		{
-			std::cerr << "Failed to get PulseAudio context\n";
-			return;
-		}
-		
-		pa_sample_spec spec = AudioHardwareImplPA::paSampleSpecForASBD(hw->asbd(), &m_convertSignedUnsigned);
-		
+}
+
+void AudioHardwareStreamPA::connect()
+{
+	std::shared_ptr<AudioHardwareStreamPA*> self = m_self;
+
+	static_cast<AudioHardwareImplPA*>(m_hw)->getPAContext(^(pa_context* context) {
+		// the stream may have been stopped while the context was connecting
+		if (AudioHardwareStreamPA* This = *self)
+			This->setUp(context);
+	});
+}
+
+void AudioHardwareStreamPA::setUp(pa_context* context)
+{
+	if (!context)
+	{
+		std::cerr << "Failed to get PulseAudio context\n";
+		return;
+	}
+
+	{
+		pa_sample_spec spec = AudioHardwareImplPA::paSampleSpecForASBD(m_asbd, &m_convertSignedUnsigned);
+
 		if (!pa_sample_spec_valid(&spec))
 		{
 			std::cerr << "Failed to create a valid pa_sample_spec\n";
@@ -42,6 +58,11 @@ AudioHardwareStreamPA::AudioHardwareStreamPA(AudioHardwareImplPA* hw, AudioDevic
 		}
 
 		m_stream = pa_stream_new(context, "CoreAudio", &spec, nullptr);
+		if (!m_stream)
+		{
+			std::cerr << "pa_stream_new() failed: " << pa_strerror(pa_context_errno(context)) << std::endl;
+			return;
+		}
 
 		//pa_stream_set_state_callback(m_stream, [](pa_stream *s, void *userdata) {
 			//std::cout << "Stream state: " << pa_stream_get_state(s) << std::endl;
@@ -54,13 +75,13 @@ AudioHardwareStreamPA::AudioHardwareStreamPA(AudioHardwareImplPA* hw, AudioDevic
 		//}, nullptr);
 
 		start();
-	});
+	}
 }
 
 AudioHardwareStreamPA::~AudioHardwareStreamPA()
 {
-	if (m_stream)
-		pa_stream_unref(m_stream);
+	if (*m_self)
+		stop();
 }
 
 void AudioHardwareStreamPA::start()
@@ -70,9 +91,44 @@ void AudioHardwareStreamPA::start()
 
 void AudioHardwareStreamPA::stop()
 {
-	std::unique_lock<std::mutex> l(m_stopMutex);
-	pa_stream_disconnect(m_stream);
-	m_running = false;
+	PADispatchMainLoop* loop = static_cast<AudioHardwareImplPA*>(m_hw)->loop();
+
+	if (!loop)
+	{
+		*m_self = nullptr;
+		return;
+	}
+
+	// Waits for a callback in progress. Called from one (the client stopping the device from its IOProc),
+	// it stops right away and the callback bails out.
+	loop->sync(^{
+		*m_self = nullptr;
+		m_running = false;
+
+		if (!m_stream)
+			return;
+
+		pa_stream_set_write_callback(m_stream, nullptr, nullptr);
+		pa_stream_set_read_callback(m_stream, nullptr, nullptr);
+
+		if (pa_stream_get_state(m_stream) == PA_STREAM_CREATING)
+		{
+			// the server hasn't created it yet, so it can't be disconnected yet
+			pa_stream_set_state_callback(m_stream, [](pa_stream* s, void*) {
+				if (pa_stream_get_state(s) == PA_STREAM_READY)
+					pa_stream_disconnect(s);
+			}, nullptr);
+		}
+		else
+		{
+			pa_stream_set_state_callback(m_stream, nullptr, nullptr);
+			pa_stream_disconnect(m_stream);
+		}
+
+		// the context keeps its own reference until the stream is gone
+		pa_stream_unref(m_stream);
+		m_stream = nullptr;
+	});
 }
 
 // This function seems to only convert unsigned to signed, but it works both ways in practice
@@ -87,7 +143,7 @@ void transform(typename std::make_unsigned<T>::type* data)
 
 void AudioHardwareStreamPA::transformSignedUnsigned(AudioBufferList* abl) const
 {
-	const AudioStreamBasicDescription& asbd = m_hw->asbd();
+	const AudioStreamBasicDescription& asbd = m_asbd;
 	const bool revEndian = (asbd.mFormatFlags & kAudioFormatFlagIsBigEndian) != (asbd.mFormatFlags & kAudioFormatFlagsNativeEndian);
 
 	for (int i = 0; i < abl->mNumberBuffers; i++)

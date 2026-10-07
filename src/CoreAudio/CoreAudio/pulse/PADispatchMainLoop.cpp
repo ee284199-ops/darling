@@ -18,20 +18,29 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "PADispatchMainLoop.h"
 #include <iostream>
+#include <sys/stat.h>
+
+// marks the loop's queue, so code can tell whether it's already running on it
+static char queueKey;
 
 PADispatchMainLoop::PADispatchMainLoop()
 {
 	// Create GCD queue
 	m_queue = dispatch_queue_create("org.darlinghq.coreaudio.pulseaudio", nullptr);
+	dispatch_queue_set_specific(m_queue, &queueKey, this, nullptr);
 
 	// PulseAudio expects the event loop to be suspended while we're creating the context.
 	// I couldn't find any mention of this in the documentation, but figured it out the hard way.
 	dispatch_suspend(m_queue);
 }
 
+static void dual_destroy(dual_source* dual);
+
 PADispatchMainLoop::~PADispatchMainLoop()
 {
 	resume();
+	for (auto& [fd, dual] : m_ioSources)
+		dual_destroy(dual);
 	dispatch_release(m_queue);
 }
 
@@ -51,6 +60,24 @@ void PADispatchMainLoop::resume()
 		dispatch_resume(m_queue);
 		m_suspended = false;
 	}
+}
+
+void PADispatchMainLoop::async(void (^block)())
+{
+	dispatch_async(m_queue, block);
+}
+
+void PADispatchMainLoop::sync(void (^block)())
+{
+	if (onQueue())
+		block();
+	else
+		dispatch_sync(m_queue, block);
+}
+
+bool PADispatchMainLoop::onQueue() const
+{
+	return dispatch_get_specific(&queueKey) == this;
 }
 
 pa_mainloop_api* PADispatchMainLoop::getAPI()
@@ -78,114 +105,97 @@ pa_mainloop_api* PADispatchMainLoop::getAPI()
 	return &m_api;
 }
 
+// A PulseAudio io event: one dispatch source for reading and one for writing.
+//
+// PulseAudio frees the event for its socket and creates a new one whenever the socket is both readable
+// and writable, which is all the time. Cancelling dispatch sources and creating new ones for the same
+// descriptor that often makes the event machinery deliver events for sources that are gone, so freed
+// events are parked (with their sources suspended) and reused for the same descriptor.
 struct dual_source
 {
+	PADispatchMainLoop* loop;
 	dispatch_source_t sourceRead, sourceWrite;
-	bool readResumed, writeResumed;
-	pa_io_event_cb_t callback;
+	bool readResumed = false, writeResumed = false;
+	pa_io_event_cb_t callback = nullptr;
 	pa_io_event_destroy_cb_t destroy = nullptr;
-	pa_io_event_flags_t events;
-	void* userdata;
+	void* userdata = nullptr;
 	int fd;
+	// what the descriptor referred to, to tell whether a parked event still applies to it
+	dev_t dev = 0;
+	ino_t ino = 0;
+	// held by PulseAudio, rather than parked
+	bool inUse = false;
+	// in the loop's cache; other ones are destroyed when freed
+	bool cached = false;
 };
 
-pa_io_event* PADispatchMainLoop::io_new(pa_mainloop_api *a, int fd, pa_io_event_flags_t events, pa_io_event_cb_t cb, void *userdata)
+static void dual_identify(int fd, dev_t* dev, ino_t* ino)
 {
-	PADispatchMainLoop* This = static_cast<PADispatchMainLoop*>(a->userdata);
-	dispatch_queue_t q = This->m_queue;
+	struct stat st;
+	if (fstat(fd, &st) == 0)
+	{
+		*dev = st.st_dev;
+		*ino = st.st_ino;
+	}
+}
 
+// Delivers the events PulseAudio asked for, and none while the event is parked
+static void dual_set_events(dual_source* dual, pa_io_event_flags_t events)
+{
+	const bool read = dual->inUse && (events & (PA_IO_EVENT_INPUT | PA_IO_EVENT_ERROR | PA_IO_EVENT_HANGUP));
+	const bool write = dual->inUse && (events & PA_IO_EVENT_OUTPUT);
+
+	if (read != dual->readResumed)
+	{
+		if (read)
+			dispatch_resume(dual->sourceRead);
+		else
+			dispatch_suspend(dual->sourceRead);
+		dual->readResumed = read;
+	}
+	if (write != dual->writeResumed)
+	{
+		if (write)
+			dispatch_resume(dual->sourceWrite);
+		else
+			dispatch_suspend(dual->sourceWrite);
+		dual->writeResumed = write;
+	}
+}
+
+static dual_source* dual_create(PADispatchMainLoop* loop, dispatch_queue_t q, int fd)
+{
 	dual_source* dual = new dual_source;
 
-	bool read = events & (PA_IO_EVENT_INPUT | PA_IO_EVENT_ERROR | PA_IO_EVENT_HANGUP);
-	bool write = events & (PA_IO_EVENT_OUTPUT);
-	// std::cout << "PADispatchMainLoop::io_new(): fd=" << fd << ", read=" << read << ", write=" << write << std::endl;
-
-	dual->callback = cb;
+	dual->loop = loop;
 	dual->fd = fd;
-	dual->events = events;
-	dual->userdata = userdata;
+	dual_identify(fd, &dual->dev, &dual->ino);
+	// sources start out suspended
 	dual->sourceRead = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, fd, 0, q);
 	dual->sourceWrite = dispatch_source_create(DISPATCH_SOURCE_TYPE_WRITE, fd, 0, q);
 
 	dispatch_source_set_event_handler(dual->sourceRead, ^{
-		dual->callback(This->getAPI(), reinterpret_cast<pa_io_event*>(dual), fd, PA_IO_EVENT_INPUT, dual->userdata);
+		if (dual->inUse)
+			dual->callback(loop->getAPI(), reinterpret_cast<pa_io_event*>(dual), fd, PA_IO_EVENT_INPUT, dual->userdata);
 	});
 
 	dispatch_source_set_event_handler(dual->sourceWrite, ^{
-		// std::cout << "PADispatchMainLoop::io_new(): write event on fd " << fd << std::endl;
-		dual->callback(This->getAPI(), reinterpret_cast<pa_io_event*>(dual), fd, PA_IO_EVENT_OUTPUT, dual->userdata);
+		if (dual->inUse)
+			dual->callback(loop->getAPI(), reinterpret_cast<pa_io_event*>(dual), fd, PA_IO_EVENT_OUTPUT, dual->userdata);
 	});
 
 	dispatch_source_set_cancel_handler(dual->sourceWrite, ^{
-		if (dual->destroy)
-		{
-			dual->destroy(This->getAPI(), reinterpret_cast<pa_io_event*>(dual), dual->userdata);
-			dual->destroy = nullptr;
-		}
 		delete dual;
 	});
 
-	if (events & (PA_IO_EVENT_INPUT | PA_IO_EVENT_ERROR | PA_IO_EVENT_HANGUP))
-	{
-		dispatch_resume(dual->sourceRead);
-		dual->readResumed = true;
-	}
-	else
-		dual->readResumed = false;
-
-	if (events & (PA_IO_EVENT_OUTPUT))
-	{
-		dispatch_resume(dual->sourceWrite);
-		dual->writeResumed = true;
-	}
-	else
-		dual->writeResumed = false;
-	
-	return reinterpret_cast<pa_io_event*>(dual);
+	return dual;
 }
 
-void PADispatchMainLoop::io_enable(pa_io_event *e, pa_io_event_flags_t events)
+static void dual_destroy(dual_source* dual)
 {
-	dual_source* dual = reinterpret_cast<dual_source*>(e);
+	dual->inUse = false;
 
-	if (events & (PA_IO_EVENT_INPUT | PA_IO_EVENT_ERROR | PA_IO_EVENT_HANGUP))
-	{
-		if (!dual->readResumed)
-		{
-			// std::cout << "PADispatchMainLoop::io_enable(): disable read fd=" << dual->fd << std::endl;
-			dispatch_resume(dual->sourceRead);
-			dual->readResumed = true;
-		}
-	}
-	else if (dual->readResumed)
-	{
-		// std::cout << "PADispatchMainLoop::io_enable(): disable read fd=" << dual->fd << std::endl;
-		dispatch_suspend(dual->sourceRead);
-		dual->readResumed = false;
-	}
-
-	if (events & (PA_IO_EVENT_OUTPUT))
-	{
-		if (!dual->writeResumed)
-		{
-			// std::cout << "PADispatchMainLoop::io_enable(): enable write fd=" << dual->fd << std::endl;
-			dispatch_resume(dual->sourceWrite);
-			dual->writeResumed = true;
-		}
-	}
-	else if (dual->writeResumed)
-	{
-		// std::cout << "PADispatchMainLoop::io_enable(): disable write fd=" << dual->fd << std::endl;
-		dispatch_suspend(dual->sourceWrite);
-		dual->writeResumed = false;
-	}
-}
-
-void PADispatchMainLoop::io_free(pa_io_event *e)
-{
-	dual_source* dual = reinterpret_cast<dual_source*>(e);
-	// std::cout << "PADispatchMainLoop::io_free(): fd=" << dual->fd << std::endl;
-
+	// a suspended source doesn't get to its cancellation
 	if (!dual->readResumed)
 		dispatch_resume(dual->sourceRead);
 	dispatch_source_cancel(dual->sourceRead);
@@ -197,6 +207,68 @@ void PADispatchMainLoop::io_free(pa_io_event *e)
 	dispatch_release(dual->sourceWrite);
 
 	// dual is freed in the cancel handler
+}
+
+pa_io_event* PADispatchMainLoop::io_new(pa_mainloop_api *a, int fd, pa_io_event_flags_t events, pa_io_event_cb_t cb, void *userdata)
+{
+	PADispatchMainLoop* This = static_cast<PADispatchMainLoop*>(a->userdata);
+	dual_source* dual = nullptr;
+
+	auto it = This->m_ioSources.find(fd);
+	if (it != This->m_ioSources.end() && !it->second->inUse)
+	{
+		dev_t dev = 0;
+		ino_t ino = 0;
+		dual_identify(fd, &dev, &ino);
+
+		if (it->second->dev == dev && it->second->ino == ino)
+			dual = it->second;
+		else
+		{
+			// the descriptor was closed, and its number was reused
+			dual_destroy(it->second);
+			This->m_ioSources.erase(it);
+		}
+	}
+
+	if (!dual)
+	{
+		dual = dual_create(This, This->m_queue, fd);
+		// one event per descriptor gets reused; should there be more, the others are not
+		dual->cached = This->m_ioSources.emplace(fd, dual).second;
+	}
+
+	dual->callback = cb;
+	dual->userdata = userdata;
+	dual->destroy = nullptr;
+	dual->inUse = true;
+	dual_set_events(dual, events);
+
+	return reinterpret_cast<pa_io_event*>(dual);
+}
+
+void PADispatchMainLoop::io_enable(pa_io_event *e, pa_io_event_flags_t events)
+{
+	dual_set_events(reinterpret_cast<dual_source*>(e), events);
+}
+
+void PADispatchMainLoop::io_free(pa_io_event *e)
+{
+	dual_source* dual = reinterpret_cast<dual_source*>(e);
+	PADispatchMainLoop* loop = dual->loop;
+	pa_io_event_destroy_cb_t destroy = dual->destroy;
+	void* userdata = dual->userdata;
+
+	dual->inUse = false;
+	dual->destroy = nullptr;
+
+	if (dual->cached)
+		dual_set_events(dual, PA_IO_EVENT_NULL);
+	else
+		dual_destroy(dual);
+
+	if (destroy)
+		destroy(loop->getAPI(), e, userdata);
 }
 
 void PADispatchMainLoop::io_set_destroy(pa_io_event *e, pa_io_event_destroy_cb_t cb)

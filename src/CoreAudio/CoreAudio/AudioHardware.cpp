@@ -28,7 +28,10 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #include <unordered_map>
 #include "stub.h"
 
-static std::unordered_map<AudioObjectID, std::unique_ptr<AudioHardwareImpl>> g_objects;
+// Never destroyed: the devices live as long as the process, and tearing PulseAudio down from a static
+// destructor races with its queue, which is still running.
+static std::unordered_map<AudioObjectID, std::unique_ptr<AudioHardwareImpl>>& g_objects =
+	*new std::unordered_map<AudioObjectID, std::unique_ptr<AudioHardwareImpl>>;
 
 static void initObjects()
 {
@@ -38,7 +41,7 @@ static void initObjects()
 		g_objects.insert(std::make_pair(kAudioObjectSystemObject, std::make_unique<AudioHardwareImplPA>(kAudioObjectSystemObject)));
 		g_objects.insert(std::make_pair(kAudioObjectSystemObject + 1, std::make_unique<AudioHardwareImplPAOutput>(kAudioObjectSystemObject + 1)));
 		g_objects.insert(std::make_pair(kAudioObjectSystemObject + 2, std::make_unique<AudioHardwareImplPAInput>(kAudioObjectSystemObject + 2)));
-		g_objects.insert(std::make_pair(kAudioObjectSystemObject + 1, std::make_unique<AudioHardwareImplPAOutput>(kAudioObjectSystemObject + 3, "event")));
+		g_objects.insert(std::make_pair(kAudioObjectSystemObject + 3, std::make_unique<AudioHardwareImplPAOutput>(kAudioObjectSystemObject + 3, "event")));
 	});
 }
 

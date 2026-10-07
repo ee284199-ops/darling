@@ -30,11 +30,12 @@ AudioHardwareStreamPAOutput::AudioHardwareStreamPAOutput(AudioHardwareImplPA* hw
 void AudioHardwareStreamPAOutput::paStreamWriteCB(pa_stream* s, size_t length, void* self)
 {
 	AudioHardwareStreamPAOutput* This = static_cast<AudioHardwareStreamPAOutput*>(self);
-	std::unique_lock<std::mutex> l(This->m_stopMutex);
+	// the client may stop (and delete) the stream from its IOProc
+	std::shared_ptr<AudioHardwareStreamPA*> alive = This->m_self;
 
 	if (!This->m_running)
 	{
-		pa_stream_cork(This->m_stream, true, [](pa_stream*, int, void*) {}, nullptr);
+		pa_stream_cork(s, true, [](pa_stream*, int, void*) {}, nullptr);
 		return;
 	}
 
@@ -43,29 +44,41 @@ void AudioHardwareStreamPAOutput::paStreamWriteCB(pa_stream* s, size_t length, v
 	AudioTimeStamp fake = {0};
 	AudioBufferList* abl = static_cast<AudioBufferList*>(alloca(sizeof(AudioBufferList) + sizeof(AudioBuffer)));
 
+	const AudioStreamBasicDescription& asbd = This->m_asbd;
+	const size_t frameSize = asbd.mBytesPerFrame > 0 ? asbd.mBytesPerFrame : 1;
 	size_t done = 0;
 
 	while (done < length && This->m_running)
 	{
 		// Non-interleaved (planar) audio would have multiple buffers, but PA doesn't even support that AFAIK
 		abl->mNumberBuffers = 1;
-
-		abl->mBuffers[0].mNumberChannels = 2;
+		abl->mBuffers[0].mNumberChannels = asbd.mChannelsPerFrame > 0 ? asbd.mChannelsPerFrame : 2;
 		// abl->mBuffers[0].mData = This->m_buffer;
 
 		// std::cout << "AudioHardwareStreamPAOutput() length req=" << length << ", done=" << done << std::endl;
-		size_t rqsize = std::min<UInt32>(This->m_bufferSize, length-done);
-		pa_stream_begin_write(This->m_stream, (void**) &abl->mBuffers[0].mData, &rqsize);
+		size_t rqsize = std::min<size_t>(This->m_bufferSize, length-done);
+		if (pa_stream_begin_write(s, (void**) &abl->mBuffers[0].mData, &rqsize) < 0)
+			break;
+		// the client renders whole frames
+		rqsize -= rqsize % frameSize;
+		if (rqsize == 0)
+		{
+			pa_stream_cancel_write(s);
+			break;
+		}
 
 		abl->mBuffers[0].mDataByteSize = rqsize;
 
 		// Call the client for more data
 		OSStatus status = This->m_callback(This->m_hw->id(), &fake, nullptr, nullptr, abl, &fake, This->m_clientData);
+		if (!*alive)
+			return; // stopped from the IOProc: the stream is gone
 		if (status != noErr || !abl->mBuffers[0].mDataByteSize)
 		{
 			// std::cerr << "AudioDeviceIOProc returned " << status << ", corking...\n";
 
-			pa_stream_cork(This->m_stream, true, [](pa_stream*, int, void*) {}, nullptr);
+			pa_stream_cancel_write(s);
+			pa_stream_cork(s, true, [](pa_stream*, int, void*) {}, nullptr);
 			break;
 		}
 		else
@@ -74,7 +87,7 @@ void AudioHardwareStreamPAOutput::paStreamWriteCB(pa_stream* s, size_t length, v
 				This->transformSignedUnsigned(abl);
 				
 			// std::cout << "AudioHardwareStreamPAOutput::paStreamWriteCB(): got " << abl->mBuffers[0].mDataByteSize << " bytes\n";
-			int rv = pa_stream_write(This->m_stream, abl->mBuffers[0].mData, abl->mBuffers[0].mDataByteSize, nullptr, 0, PA_SEEK_RELATIVE);
+			int rv = pa_stream_write(s, abl->mBuffers[0].mData, abl->mBuffers[0].mDataByteSize, nullptr, 0, PA_SEEK_RELATIVE);
 			if (rv != 0)
 			{
 				// std::cerr << "pa_stream_write() failed\n";

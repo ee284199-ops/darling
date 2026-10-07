@@ -22,6 +22,8 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #include "../AudioHardwareImpl.h"
 #include "PADispatchMainLoop.h"
 #include <memory>
+#include <mutex>
+#include <vector>
 
 class PADispatchMainLoop;
 
@@ -37,15 +39,28 @@ public:
 	OSStatus setPropertyData(const AudioObjectPropertyAddress* inAddress, UInt32 inQualifierDataSize,
 		const void* inQualifierData, UInt32 inDataSize, const void* inData) override;
 	
+	// Calls cb on the PulseAudio loop's queue once the context has connected, or with nullptr if that failed
 	void getPAContext(void (^cb)(pa_context*));
+	// The queue all PulseAudio calls run on; exists once getPAContext() has been called
+	PADispatchMainLoop* loop() const { return m_loop.get(); }
 	static pa_sample_spec paSampleSpecForASBD(const AudioStreamBasicDescription& asbd, bool* convertSignedUnsigned = nullptr);
 protected:
 	AudioHardwareStream* createStream(AudioDeviceIOProc callback, void* clientData) override;
 	bool validateFormat(const AudioStreamBasicDescription* asbd) const override;
 private:
+	static void paContextStateCB(pa_context* c, void* self);
+
+	enum class ContextState { None, Connecting, Ready, Failed };
+
 	pa_context* m_context = nullptr;
 	std::unique_ptr<PADispatchMainLoop> m_loop;
 	const char* m_paRole;
+
+	// recursive: PulseAudio may report a failure from within pa_context_connect()
+	std::recursive_mutex m_contextMutex;
+	ContextState m_contextState = ContextState::None;
+	// callers waiting for the context to connect
+	std::vector<void (^)(pa_context*)> m_contextWaiters;
 };
 
 #endif

@@ -67,5 +67,8 @@ OSStatus AudioHardwareImplPAInput::setPropertyData(const AudioObjectPropertyAddr
 
 AudioHardwareStream* AudioHardwareImplPAInput::createStream(AudioDeviceIOProc callback, void* clientData)
 {
-	return new AudioHardwareStreamPAInput(this, callback, clientData);
+	AudioHardwareStreamPA* stream = new AudioHardwareStreamPAInput(this, callback, clientData);
+	// only now that it's constructed: setting up ends up calling its start()
+	stream->connect();
+	return stream;
 }
