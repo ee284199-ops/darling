@@ -21,6 +21,7 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #define AUCOMPONENT_H
 #include <MacTypes.h>
 #include <CoreFoundation/CFString.h>
+#include <CoreFoundation/CFArray.h>
 #include <AudioToolbox/AudioComponent.h>
 #include <CoreAudio/CoreAudioTypes.h>
 

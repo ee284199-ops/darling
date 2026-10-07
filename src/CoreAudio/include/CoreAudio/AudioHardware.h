@@ -221,6 +221,7 @@ struct AudioHardwareIOProcStreamUsage
 	UInt32 mNumberStreams;
 	UInt32 mStreamIsOn[1];
 };
+typedef struct AudioHardwareIOProcStreamUsage AudioHardwareIOProcStreamUsage;
 
 OSStatus AudioDeviceGetProperty(AudioDeviceID inDevice, UInt32 inChannel, Boolean isInput, AudioDevicePropertyID inPropertyID, UInt32* ioPropertyDataSize, void* outPropertyData);
 OSStatus AudioDeviceGetPropertyInfo(AudioDeviceID inDevice, UInt32 inChannel, Boolean isInput, AudioDevicePropertyID inPropertyID, UInt32* outSize, Boolean* outWritable);

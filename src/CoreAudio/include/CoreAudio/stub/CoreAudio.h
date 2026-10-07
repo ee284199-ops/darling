@@ -21,8 +21,9 @@
 #ifndef _CoreAudio_H_
 #define _CoreAudio_H_
 
-#import <Foundation/Foundation.h>
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void* AudioConvertHostTimeToNanos(void);
 void* AudioConvertNanosToHostTime(void);
@@ -92,5 +93,9 @@ void* AudioStreamGetProperty(void);
 void* AudioStreamGetPropertyInfo(void);
 void* AudioStreamRemovePropertyListener(void);
 void* AudioStreamSetProperty(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

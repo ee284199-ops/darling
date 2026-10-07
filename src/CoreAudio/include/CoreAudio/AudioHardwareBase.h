@@ -19,6 +19,7 @@ struct AudioObjectPropertyAddress
 	AudioObjectPropertyScope mScope;
 	AudioObjectPropertyElement mElement;
 };
+typedef struct AudioObjectPropertyAddress AudioObjectPropertyAddress;
 
 enum
 {

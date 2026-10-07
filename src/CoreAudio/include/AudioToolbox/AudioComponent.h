@@ -94,7 +94,10 @@ UIImage* AudioComponentGetIcon(AudioComponent component, float desiredPointSize)
 #endif
 
 OSStatus AudioComponentInstanceNew(AudioComponent component, AudioComponentInstance* outInstance);
+
+#ifdef __BLOCKS__
 void AudioComponentInstantiate(AudioComponent component, AudioComponentInstantiationOptions opts, void(^handler)(AudioComponentInstance, OSStatus));
+#endif
 
 OSStatus AudioComponentInstanceDispose(AudioComponentInstance inst);
 AudioComponent AudioComponentInstanceGetComponent(AudioComponentInstance inst);
