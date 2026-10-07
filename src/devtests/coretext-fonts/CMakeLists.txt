@@ -1,0 +1,10 @@
+add_devtest_app(CoreTextFonts
+	SOURCES
+		main.m
+	LIBRARIES
+		CoreText
+		CoreGraphics
+		CoreFoundation
+		Foundation
+		objc
+)
