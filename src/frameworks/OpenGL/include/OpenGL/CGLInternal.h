@@ -17,6 +17,10 @@ CGL_EXPORT CGLWindowRef CGLGetWindow(void *native_window);
 CGL_EXPORT void CGLDestroyWindow(CGLWindowRef window);
 
 CGL_EXPORT CGLError CGLContextMakeCurrentAndAttachToWindow(CGLContextObj context, CGLWindowRef window);
+// Gives the context a new window (or NULL) to draw into without making it current. A thread that
+// has the context current switches to the new window right away if it is the calling thread,
+// otherwise at its next CGLFlushDrawable.
+CGL_EXPORT CGLError CGLContextAttachToWindow(CGLContextObj context, CGLWindowRef window);
 CGLError CGLSetSurface(CGLContextObj gl, CGSConnectionID cid, CGSWindowID wid, CGSSurfaceID sid);
 CGLContextObj CGWindowContextCreate(CGSConnectionID cid, CGSWindowID wid, CFDictionaryRef options);
 

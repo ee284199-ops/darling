@@ -34,6 +34,11 @@ add_framework(OpenGL
         EGL
         CoreFoundation
         CoreGraphics
+
+    # apps (e.g. glutin) find GL functions with
+    # CFBundleGetFunctionPointerForName on the "com.apple.opengl" bundle
+    RESOURCES
+        Info.plist Info.plist
 )
 
 set_property(TARGET OpenGL APPEND_STRING PROPERTY LINK_FLAGS

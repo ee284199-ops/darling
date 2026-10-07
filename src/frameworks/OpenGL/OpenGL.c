@@ -27,12 +27,32 @@ static EGLDisplay display;
 static EGLConfig config;
 static int num_config;
 
+// Every context and window surface uses this one config, whatever the pixel format asked for, so
+// it has the depth and stencil buffers that nearly every OpenGL app (and Skia) wants.
 static EGLint const attribute_list[] = {
+    EGL_RED_SIZE, 1,
+    EGL_GREEN_SIZE, 1,
+    EGL_BLUE_SIZE, 1,
+    EGL_DEPTH_SIZE, 24,
+    EGL_STENCIL_SIZE, 8,
+    EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+    EGL_NONE
+};
+
+// used if the display has no config with all of the above
+static EGLint const fallback_attribute_list[] = {
     EGL_RED_SIZE, 1,
     EGL_GREEN_SIZE, 1,
     EGL_BLUE_SIZE, 1,
     EGL_NONE
 };
+
+static void choose_config(EGLDisplay disp, EGLConfig *result, int *count)
+{
+    if (!eglChooseConfig(disp, attribute_list, result, 1, count) || *count == 0)
+        eglChooseConfig(disp, fallback_attribute_list, result, 1, count);
+}
 
 struct _CGLDisplay
 {
@@ -100,7 +120,7 @@ CGLError CGLRegisterNativeDisplay(void *native_display) {
     }
 
     eglInitialize(display, NULL, NULL);
-    eglChooseConfig(display, attribute_list, &config, 1, &num_config);
+    choose_config(display, &config, &num_config);
 
     eglBindAPI(EGL_OPENGL_API);
 
@@ -125,7 +145,7 @@ static struct _CGLDisplay* getCGLDisplay(CGSConnectionID cid)
         rv->display = disp;
 
         eglInitialize(rv->display, NULL, NULL);
-        eglChooseConfig(rv->display, attribute_list, &rv->config, 1, &rv->num_config);
+        choose_config(rv->display, &rv->config, &rv->num_config);
 
         eglBindAPI(EGL_OPENGL_API);
 
@@ -179,6 +199,15 @@ CGL_EXPORT CGLError CGLContextMakeCurrentAndAttachToWindow(CGLContextObj context
         return kCGLBadContext;
     context->egl_surface = (EGLSurface) window;
     return CGLSetCurrentContext(context);
+}
+
+CGL_EXPORT CGLError CGLContextAttachToWindow(CGLContextObj context, CGLWindowRef window) {
+    if (!context)
+        return kCGLBadContext;
+    context->egl_surface = (EGLSurface) window;
+    if (CGLGetCurrentContext() == context)
+        return CGLSetCurrentContext(context);
+    return kCGLNoError;
 }
 
 static pthread_key_t current_context_key;
@@ -384,7 +413,14 @@ CGLError CGLUnlockContext(CGLContextObj context) {
 }
 
 CGLError CGLFlushDrawable(CGLContextObj context) {
-    eglSwapBuffers(display,context->egl_surface);
+    if (context->egl_surface == EGL_NO_SURFACE)
+        return kCGLNoError;
+
+    // the context may have been given another window on another thread since it became current here
+    if (CGLGetCurrentContext() == context && eglGetCurrentSurface(EGL_DRAW) != context->egl_surface)
+        CGLSetCurrentContext(context);
+
+    eglSwapBuffers(display, context->egl_surface);
     return kCGLNoError;
 }
 
