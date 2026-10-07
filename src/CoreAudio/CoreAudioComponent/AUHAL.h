@@ -25,6 +25,7 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 #include <mutex>
 #include <memory>
 #include <stdint.h>
+#include <vector>
 
 class AUHAL : public AUBase
 {
@@ -34,6 +35,7 @@ public:
 
 	bool CanScheduleParameters() const override;
 	bool StreamFormatWritable(AudioUnitScope scope, AudioUnitElement element) override;
+	bool ValidFormat(AudioUnitScope scope, AudioUnitElement element, const CAStreamBasicDescription& format) override;
 	OSStatus Version() override;
 
 	OSStatus Start() override;
@@ -72,6 +74,10 @@ protected:
 	bool m_dataAvailable = false;
 	std::condition_variable m_dataAvailableCV;
 	std::mutex m_dataAvailableMutex;
+
+	// non-interleaved input is pulled into these, then interleaved for the device
+	std::vector<float> m_planar;
+	std::vector<uint8_t> m_planarList;
 
 	// TODO: Prepare for non-interleaved audio
 	std::unique_ptr<uint8_t[]> m_buffer;

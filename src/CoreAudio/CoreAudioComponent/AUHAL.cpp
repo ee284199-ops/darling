@@ -18,6 +18,7 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "AUHAL.h"
+#include <cstddef>
 #include <iostream>
 
 #pragma GCC visibility push(default)
@@ -49,7 +50,25 @@ bool AUHAL::CanScheduleParameters() const
 
 bool AUHAL::StreamFormatWritable(AudioUnitScope scope, AudioUnitElement element)
 {
-	return !m_running && IsInitialized();
+	// apps set the format before initializing the unit (and may change it after)
+	return !m_running;
+}
+
+// Any linear PCM the sound server plays: interleaved integers or floats, or non-interleaved
+// 32-bit floats (Core Audio's canonical format), which playback interleaves.
+bool AUHAL::ValidFormat(AudioUnitScope scope, AudioUnitElement element, const CAStreamBasicDescription& format)
+{
+	if (format.mFormatID != kAudioFormatLinearPCM || format.mChannelsPerFrame == 0 ||
+		format.mChannelsPerFrame > 16 || format.mSampleRate <= 0)
+		return false;
+
+	if (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved)
+		return (format.mFormatFlags & kAudioFormatFlagIsFloat) && format.mBitsPerChannel == 32;
+
+	if (format.mFormatFlags & kAudioFormatFlagIsFloat)
+		return format.mBitsPerChannel == 32;
+	return format.mBitsPerChannel == 8 || format.mBitsPerChannel == 16 ||
+		format.mBitsPerChannel == 24 || format.mBitsPerChannel == 32;
 }
 
 OSStatus AUHAL::Version()
@@ -86,7 +105,14 @@ OSStatus AUHAL::Start()
 
 		// m_auhalData.open("/tmp/auhal.raw", std::ios_base::binary | std::ios_base::out);
 
-		const CAStreamBasicDescription& desc = GetStreamFormat(kAudioUnitScope_Input, kOutputBus);
+		CAStreamBasicDescription desc = GetStreamFormat(kAudioUnitScope_Input, kOutputBus);
+
+		// the device plays interleaved samples
+		if (desc.mFormatFlags & kAudioFormatFlagIsNonInterleaved)
+		{
+			desc.mFormatFlags &= ~kAudioFormatFlagIsNonInterleaved;
+			desc.mBytesPerFrame = desc.mBytesPerPacket = desc.mChannelsPerFrame * (desc.mBitsPerChannel / 8);
+		}
 		AudioDeviceSetProperty(m_outputDevice, nullptr, 0, false, kAudioDevicePropertyStreamFormat, sizeof(AudioStreamBasicDescription), &desc);
 		AudioDeviceStart(m_outputDevice, m_outputProcID);
 	}
@@ -111,13 +137,16 @@ OSStatus AUHAL::Stop()
 	{
 		AudioDeviceStop(m_outputDevice, m_outputProcID);
 		AudioDeviceDestroyIOProcID(m_outputDevice, m_outputProcID);
+		m_outputProcID = 0;
 	}
 	if (m_inputProcID)
 	{
 		AudioDeviceStop(m_inputDevice, m_inputProcID);
 		AudioDeviceDestroyIOProcID(m_inputDevice, m_inputProcID);
+		m_inputProcID = 0;
 	}
 
+	m_running = false;
 	return noErr;
 }
 
@@ -289,8 +318,43 @@ OSStatus AUHAL::doPlayback(const AudioTimeStamp* inNow, AudioBufferList* outOutp
 	OSStatus result = noErr;
 	AudioUnitRenderActionFlags flags = kAudioUnitRenderAction_PreRender;
 	const CAStreamBasicDescription& desc = GetStreamFormat(kAudioUnitScope_Input, kOutputBus);
+	const UInt32 channels = desc.mChannelsPerFrame;
 
-	UInt32 nFrames = outOutputData->mBuffers[0].mDataByteSize / (desc.mBytesPerFrame / outOutputData->mBuffers[0].mNumberChannels);
+	if (desc.mFormatFlags & kAudioFormatFlagIsNonInterleaved)
+	{
+		// pull one buffer per channel, then interleave them into the device's buffer
+		const UInt32 nFrames = outOutputData->mBuffers[0].mDataByteSize / (channels * sizeof(float));
+		const size_t listSize = offsetof(AudioBufferList, mBuffers) + channels * sizeof(AudioBuffer);
+
+		if (m_planar.size() < size_t(nFrames) * channels)
+			m_planar.resize(size_t(nFrames) * channels);
+		if (m_planarList.size() < listSize)
+			m_planarList.resize(listSize);
+
+		AudioBufferList* planar = reinterpret_cast<AudioBufferList*>(m_planarList.data());
+		planar->mNumberBuffers = channels;
+		for (UInt32 c = 0; c < channels; c++)
+		{
+			planar->mBuffers[c].mNumberChannels = 1;
+			planar->mBuffers[c].mDataByteSize = nFrames * sizeof(float);
+			planar->mBuffers[c].mData = m_planar.data() + size_t(c) * nFrames;
+		}
+
+		result = GetInput(kOutputBus)->PullInputWithBufferList(flags, *inNow, kOutputBus, nFrames, planar);
+
+		float* out = static_cast<float*>(outOutputData->mBuffers[0].mData);
+		for (UInt32 c = 0; c < channels; c++)
+		{
+			// the source may have handed back buffers of its own
+			const float* in = static_cast<const float*>(planar->mBuffers[c].mData);
+			for (UInt32 f = 0; f < nFrames; f++)
+				out[size_t(f) * channels + c] = (result == noErr && in != nullptr) ? in[f] : 0.0f;
+		}
+		outOutputData->mBuffers[0].mDataByteSize = nFrames * channels * sizeof(float);
+		return result;
+	}
+
+	const UInt32 nFrames = outOutputData->mBuffers[0].mDataByteSize / desc.mBytesPerFrame;
 	result = GetInput(kOutputBus)->PullInputWithBufferList(flags, *inNow, kOutputBus, nFrames, outOutputData);
 
 	// std::cout << "Pull result: " << result << std::endl;
