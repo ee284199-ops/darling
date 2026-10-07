@@ -11,6 +11,22 @@ extern "C" {
 typedef struct AUGraphData* AUGraph;
 typedef SInt32 AUNode;
 
+enum
+{
+	kAUGraphErr_NodeNotFound = -10860,
+	kAUGraphErr_InvalidConnection = -10861,
+	kAUGraphErr_OutputNodeErr = -10862,
+	kAUGraphErr_CannotDoInCurrentContext = -10863,
+	kAUGraphErr_InvalidAudioUnit = -10864
+};
+
+typedef UInt32 AUNodeInteractionType;
+enum
+{
+	kAUNodeInteraction_Connection = 1,
+	kAUNodeInteraction_InputCallback = 2
+};
+
 struct AudioUnitNodeConnection
 {
 	AUNode sourceNode;
@@ -40,13 +56,6 @@ struct AUNodeInteraction
 	} nodeInteraction;
 };
 typedef struct AUNodeInteraction AUNodeInteraction;
-
-typedef void
-(*AudioUnitPropertyListenerProc)(void * inRefCon,
-								AudioUnit                       inUnit,
-								AudioUnitPropertyID     inID,
-								AudioUnitScope          inScope,
-								AudioUnitElement        inElement);
 
 OSStatus AUGraphAddNode(AUGraph inGraph, const AudioComponentDescription *inDescription, AUNode *outNode);
 OSStatus AUGraphNewNode(AUGraph inGraph, const struct ComponentDescription *inDescription, UInt32 inClassDataSize, const void *inClassData, AUNode *outNode);
