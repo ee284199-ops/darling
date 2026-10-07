@@ -61,6 +61,22 @@ static void printDescriptor(CFStringRef label, CTFontDescriptorRef descriptor) {
     if (url != NULL) CFRelease(url);
 }
 
+// CoreText's table list holds the tags themselves (Skia reads them that way), not CFNumbers.
+static int listsHeadTable(CTFontRef font) {
+    CFArrayRef tables = CTFontCopyAvailableTables(font, kCTFontTableOptionNoOptions);
+    CFIndex i;
+    int found = 0;
+
+    for (i = 0; tables != NULL && i < CFArrayGetCount(tables); i++) {
+        if ((uintptr_t) CFArrayGetValueAtIndex(tables, i) == kCTFontTableHead)
+            found = 1;
+    }
+    printf("      %ld tables\n", tables != NULL ? (long) CFArrayGetCount(tables) : -1L);
+    if (tables != NULL)
+        CFRelease(tables);
+    return found;
+}
+
 // Counts pixels with any color in an RGBA/ARGB buffer: the glyphs are drawn white on opaque black,
 // so the alpha channel alone says nothing.
 static size_t countLitPixels(const uint8_t* pixels, size_t width, size_t height, size_t bytesPerRow, int alphaFirst) {
@@ -116,6 +132,36 @@ static int checkDrawing(CTFontRef font) {
 
     CGContextRelease(context);
     CFRelease(rgb);
+    return lit > 10;
+}
+
+// Skia (Neovide) draws glyphs into RGB contexts without alpha: NoneSkipFirst, host byte order.
+static int checkSkipFirstDrawing(CTFontRef font) {
+    const size_t size = 32;
+    CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(NULL, size, size, 8, size * 4, rgb,
+        kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Host);
+    UniChar character = 'H';
+    CGGlyph glyph;
+    CGPoint origin = CGPointMake(8, 8);
+    size_t lit = 0;
+
+    CFRelease(rgb);
+    if (context == NULL || !CTFontGetGlyphsForCharacters(font, &character, &glyph, 1)) {
+        if (context != NULL)
+            CGContextRelease(context);
+        return 0;
+    }
+
+    CGContextSetRGBFillColor(context, 0, 0, 0, 1);
+    CGContextFillRect(context, CGRectMake(0, 0, size, size));
+    CGContextSetRGBFillColor(context, 1, 1, 1, 1);
+    CTFontDrawGlyphs(font, &glyph, &origin, 1, context);
+
+    // host byte order on x86: B, G, R, unused
+    lit = countLitPixels((const uint8_t*) CGBitmapContextGetData(context), size, size, size * 4, 0);
+    printf("      %zu lit pixels\n", lit);
+    CGContextRelease(context);
     return lit > 10;
 }
 
@@ -282,8 +328,11 @@ int main(int argc, char** argv) {
             if (headTable != NULL)
                 CFRelease(headTable);
 
+            expect(listsHeadTable(font), "CTFontCopyAvailableTables lists head as a raw tag");
+
             expect(checkDrawing(font), "CTFontDrawGlyphs draws white glyphs on black");
             expect(checkGlyphRasterization(font, 'H'), "a glyph rasterized like Alacritty does has lit pixels");
+            expect(checkSkipFirstDrawing(font), "a glyph drawn into a NoneSkipFirst context like Skia does has lit pixels");
             {
                 CTFontRef menlo = CTFontCreateWithName(CFSTR("Menlo"), 11.25, NULL);
                 if (menlo != NULL) {
@@ -292,6 +341,8 @@ int main(int argc, char** argv) {
                     printString(family);
                     if (family != NULL) CFRelease(family);
                     expect((CTFontGetSymbolicTraits(menlo) & kCTFontTraitMonoSpace) != 0, "Menlo resolves to a monospace font");
+                    // usually a face in a .ttc collection (Noto Sans Mono CJK)
+                    expect(listsHeadTable(menlo), "CTFontCopyAvailableTables lists head for Menlo's font");
                     expect(checkGlyphRasterization(menlo, 'H'), "Menlo 11.25pt 'H' rasterized like Alacritty does has lit pixels");
                     CFRelease(menlo);
                 }

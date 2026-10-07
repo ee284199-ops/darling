@@ -291,8 +291,13 @@ static void* tracedGetFunctionPointerForName(CFBundleRef bundle, CFStringRef nam
 	char buffer[128];
 	size_t i;
 
-	if (function == NULL || !CFStringGetCString(name, buffer, sizeof(buffer), kCFStringEncodingUTF8))
+	if (!CFStringGetCString(name, buffer, sizeof(buffer), kCFStringEncodingUTF8))
 		return function;
+	if (function == NULL) {
+		// apps that check for NULL are fine; the ones that don't crash calling address 0
+		fprintf(logFile(), "lookup failed: %s\n", buffer);
+		return NULL;
+	}
 
 	for (i = 0; i < sizeof(wrapped) / sizeof(wrapped[0]); i++) {
 		if (strcmp(buffer, wrapped[i].name) == 0) {
